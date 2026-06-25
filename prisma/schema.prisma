@@ -1,0 +1,47 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UploadStatus {
+  NEW
+  UPLOADING
+  MERGING
+  COMPLETED
+  FAILED
+}
+
+model Upload {
+  id             String @id @default(uuid())
+  fileHash       String @unique
+  fileName       String
+  fileSize       BigInt
+  totalChunks    Int
+  uploadedChunks Int    @default(0)
+
+  status UploadStatus @default(NEW)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chunks UploadChunk[]
+
+  @@map("uploads")
+}
+
+model UploadChunk {
+  uploadId   String
+  chunkIndex Int
+
+  uploadedAt DateTime @default(now())
+
+  upload Upload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@id([uploadId, chunkIndex])
+  @@index([uploadId])
+  @@map("upload_chunks")
+}
