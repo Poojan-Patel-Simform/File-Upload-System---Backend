@@ -37,6 +37,8 @@ model UploadChunk {
   uploadId   String
   chunkIndex Int
 
+  checksum String?
+
   uploadedAt DateTime @default(now())
 
   upload Upload @relation(fields: [uploadId], references: [id], onDelete: Cascade)

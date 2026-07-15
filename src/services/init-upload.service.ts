@@ -2,13 +2,13 @@ import { type Request, type Response } from "express";
 import { prisma } from "../db/prisma.js";
 import path from "node:path";
 import { CHUNK_DIR } from "../constants.js";
+import { createHash } from "node:crypto";
 import fs from "fs/promises";
 
 export const initUploadService = async (req: Request, res: Response) => {
   try {
     const { fileHash, fileName, fileSize, totalChunks } = req.body;
 
-    // Check if all required parameters are present and valid
     if (!fileHash || !fileName || !fileSize || !totalChunks) {
       return res.status(400).json({
         success: false,
@@ -17,7 +17,6 @@ export const initUploadService = async (req: Request, res: Response) => {
       });
     }
 
-    // Validate totalChunks is a positive integer
     if (!Number.isInteger(totalChunks) || totalChunks <= 0) {
       return res.status(400).json({
         success: false,
@@ -26,7 +25,6 @@ export const initUploadService = async (req: Request, res: Response) => {
       });
     }
 
-    // Validate fileSize is a valid integer (can be large, so use BigInt)
     let parsedFileSize: bigint;
     try {
       parsedFileSize = BigInt(fileSize);
@@ -38,19 +36,16 @@ export const initUploadService = async (req: Request, res: Response) => {
       });
     }
 
-    // Check if an upload with the same fileHash already exists
     const existingUpload = await prisma.upload.findFirst({
       where: { fileHash },
       include: {
         chunks: {
-          select: { chunkIndex: true },
+          select: { chunkIndex: true, checksum: true },
         },
       },
     });
 
-    // Case 1: brand new file
     if (!existingUpload) {
-      // Create a new upload record in the database
       const upload = await prisma.upload.create({
         data: {
           fileHash,
@@ -70,7 +65,6 @@ export const initUploadService = async (req: Request, res: Response) => {
       });
     }
 
-    // Case 2: already fully uploaded — dedupe, skip upload entirely
     if (existingUpload.status === "COMPLETED") {
       return res.status(200).json({
         success: true,
@@ -82,7 +76,6 @@ export const initUploadService = async (req: Request, res: Response) => {
       });
     }
 
-    // Case 3: resume an in-progress upload
     if (existingUpload.status === "UPLOADING") {
       return res.status(200).json({
         success: true,
@@ -94,7 +87,6 @@ export const initUploadService = async (req: Request, res: Response) => {
       });
     }
 
-    // Case 4: a merge/finalize is in progress — don't let the client interfere
     if (existingUpload.status === "MERGING") {
       return res.status(409).json({
         success: false,
@@ -103,9 +95,82 @@ export const initUploadService = async (req: Request, res: Response) => {
       });
     }
 
-    // Case 5: previously failed — reset and let them restart
     if (existingUpload.status === "FAILED") {
       const uploadDir = path.join(CHUNK_DIR, existingUpload.id);
+
+      const chunkingMatches = existingUpload.totalChunks === totalChunks;
+
+      let survivingIndices: number[] | null = null;
+      let staleIndices: number[] = [];
+
+      if (chunkingMatches) {
+        try {
+          await fs.access(uploadDir);
+
+          const surviving: number[] = [];
+          const stale: number[] = [];
+
+          for (const chunk of existingUpload.chunks) {
+            const chunkPath = path.join(uploadDir, String(chunk.chunkIndex));
+            try {
+              const stat = await fs.stat(chunkPath);
+              if (stat.size === 0) {
+                stale.push(chunk.chunkIndex);
+                continue;
+              }
+
+              if (chunk.checksum) {
+                const buffer = await fs.readFile(chunkPath);
+                const actualChecksum = createHash("sha256")
+                  .update(buffer)
+                  .digest("hex");
+                if (actualChecksum !== chunk.checksum) {
+                  stale.push(chunk.chunkIndex);
+                  continue;
+                }
+              }
+
+              surviving.push(chunk.chunkIndex);
+            } catch {
+              stale.push(chunk.chunkIndex);
+            }
+          }
+
+          survivingIndices = surviving;
+          staleIndices = stale;
+        } catch {
+          survivingIndices = null;
+        }
+      }
+
+      if (staleIndices.length > 0) {
+        await prisma.uploadChunk.deleteMany({
+          where: { uploadId: existingUpload.id, chunkIndex: { in: staleIndices } },
+        });
+      }
+
+      if (survivingIndices !== null) {
+        const resumed = await prisma.upload.update({
+          where: { id: existingUpload.id },
+          data: {
+            status: "UPLOADING",
+            uploadedChunks: survivingIndices.length,
+            fileName,
+            fileSize: parsedFileSize,
+            totalChunks,
+          },
+        });
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            status: resumed.status,
+            uploadId: resumed.id,
+            uploadedChunks: survivingIndices,
+          },
+        });
+      }
+
       await fs.rm(uploadDir, { recursive: true, force: true });
 
       await prisma.uploadChunk.deleteMany({
@@ -133,7 +198,6 @@ export const initUploadService = async (req: Request, res: Response) => {
       });
     }
 
-    // Case 6: NEW status row exists but no chunks yet (created but client never started)
     return res.status(200).json({
       success: true,
       data: {

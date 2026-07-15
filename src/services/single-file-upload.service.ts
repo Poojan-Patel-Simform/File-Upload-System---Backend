@@ -1,7 +1,9 @@
 import { type Request, type Response } from "express";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import fs from "fs/promises";
 import { TRADITIONAL_UPLOAD_DIR } from "../constants.js";
+import { prisma } from "../db/prisma.js";
 
 export const singleFileUploadService = async (req: Request, res: Response) => {
   try {
@@ -15,17 +17,52 @@ export const singleFileUploadService = async (req: Request, res: Response) => {
       });
     }
 
-    await fs.mkdir(TRADITIONAL_UPLOAD_DIR, { recursive: true });
+    const fileHash = createHash("sha256").update(file.buffer).digest("hex");
 
-    const fileName = `${Date.now()}-${file.originalname}`;
-    const filePath = path.join(TRADITIONAL_UPLOAD_DIR, fileName);
+    const existing = await prisma.upload.findUnique({ where: { fileHash } });
 
+    if (existing?.status === "COMPLETED") {
+      return res.status(200).json({
+        success: true,
+        data: {
+          uploadId: existing.id,
+          fileName: existing.fileName,
+          fileSize: Number(existing.fileSize),
+          deduplicated: true,
+        },
+      });
+    }
+
+    const upload = await prisma.upload.upsert({
+      where: { fileHash },
+      update: {
+        status: "COMPLETED",
+        fileName: file.originalname,
+        fileSize: BigInt(file.buffer.length),
+        totalChunks: 1,
+        uploadedChunks: 1,
+      },
+      create: {
+        fileHash,
+        fileName: file.originalname,
+        fileSize: BigInt(file.buffer.length),
+        totalChunks: 1,
+        uploadedChunks: 1,
+        status: "COMPLETED",
+      },
+    });
+
+    const uploadDir = path.join(TRADITIONAL_UPLOAD_DIR, upload.id);
+    const filePath = path.join(uploadDir, upload.fileName);
+
+    await fs.mkdir(uploadDir, { recursive: true });
     await fs.writeFile(filePath, file.buffer);
 
     return res.status(200).json({
       success: true,
       data: {
-        fileName,
+        uploadId: upload.id,
+        fileName: upload.fileName,
         filePath,
         fileSize: file.buffer.length,
       },

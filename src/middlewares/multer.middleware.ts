@@ -2,6 +2,14 @@ import multer from "multer";
 
 const storage = multer.memoryStorage();
 
-export const multerMiddleware = multer({
+const MB = 1024 * 1024;
+
+export const singleFileUploadMiddleware = multer({
   storage,
+  limits: { fileSize: 500 * MB },
+}).single("file");
+
+export const chunkUploadMiddleware = multer({
+  storage,
+  limits: { fileSize: 64 * MB },
 }).single("file");
