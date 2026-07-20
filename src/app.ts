@@ -4,6 +4,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { MulterError } from "multer";
 import uploadRouter from "./routes/upload.routes.js";
+import cloudinaryRouter from "./routes/cloudinary.routes.js";
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use("/api/", limiter);
 app.use(express.json());
 
 app.use("/api/uploads/", uploadRouter);
+app.use("/api/cloudinary/", cloudinaryRouter);
 
 app.use(
   (

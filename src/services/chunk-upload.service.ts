@@ -5,28 +5,16 @@ import { CHUNK_DIR, MERGED_DIR } from "../constants.js";
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import fs from "fs/promises";
+import { type ChunkUploadBody } from "../schemas/upload.schema.js";
 
 export const chunkUploadService = async (req: Request, res: Response) => {
   try {
-    const { uploadId, chunkIndex, checksum } = req.body;
+    const {
+      uploadId,
+      chunkIndex: parsedChunkIndex,
+      checksum,
+    } = req.body as ChunkUploadBody;
     const file = req.file as Express.Multer.File | undefined;
-
-    if (!uploadId || chunkIndex === undefined || chunkIndex === null) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required parameters",
-        error: "Bad request",
-      });
-    }
-
-    const parsedChunkIndex = Number(chunkIndex);
-    if (!Number.isInteger(parsedChunkIndex) || parsedChunkIndex < 0) {
-      return res.status(400).json({
-        success: false,
-        message: "chunkIndex must be a non-negative integer",
-        error: "Bad request",
-      });
-    }
 
     if (!file || !file.buffer || file.buffer.length === 0) {
       return res.status(400).json({
@@ -80,20 +68,6 @@ export const chunkUploadService = async (req: Request, res: Response) => {
           "Upload previously failed, re-initialize before uploading chunks",
         error: "Conflict",
       });
-    }
-
-    if (checksum) {
-      const computedChunkHash = createHash("sha256")
-        .update(file.buffer)
-        .digest("hex");
-
-      if (computedChunkHash !== checksum) {
-        return res.status(400).json({
-          success: false,
-          message: `Checksum mismatch for chunk ${parsedChunkIndex}: expected ${checksum}, got ${computedChunkHash}`,
-          error: "Bad request",
-        });
-      }
     }
 
     const uploadDir = path.join(CHUNK_DIR, uploadId);

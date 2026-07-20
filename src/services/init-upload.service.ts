@@ -4,37 +4,12 @@ import path from "node:path";
 import { CHUNK_DIR } from "../constants.js";
 import { createHash } from "node:crypto";
 import fs from "fs/promises";
+import { type InitUploadBody } from "../schemas/upload.schema.js";
 
 export const initUploadService = async (req: Request, res: Response) => {
   try {
-    const { fileHash, fileName, fileSize, totalChunks } = req.body;
-
-    if (!fileHash || !fileName || !fileSize || !totalChunks) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required parameters",
-        error: "Bad request",
-      });
-    }
-
-    if (!Number.isInteger(totalChunks) || totalChunks <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "totalChunks must be a positive integer",
-        error: "Bad request",
-      });
-    }
-
-    let parsedFileSize: bigint;
-    try {
-      parsedFileSize = BigInt(fileSize);
-    } catch {
-      return res.status(400).json({
-        success: false,
-        message: "fileSize must be a valid integer",
-        error: "Bad request",
-      });
-    }
+    const { fileHash, fileName, fileSize: parsedFileSize, totalChunks } =
+      req.body as InitUploadBody;
 
     const existingUpload = await prisma.upload.findFirst({
       where: { fileHash },
@@ -145,7 +120,10 @@ export const initUploadService = async (req: Request, res: Response) => {
 
       if (staleIndices.length > 0) {
         await prisma.uploadChunk.deleteMany({
-          where: { uploadId: existingUpload.id, chunkIndex: { in: staleIndices } },
+          where: {
+            uploadId: existingUpload.id,
+            chunkIndex: { in: staleIndices },
+          },
         });
       }
 

@@ -12,6 +12,11 @@ import {
   chunkUploadMiddleware,
 } from "../middlewares/multer.middleware.js";
 import { verifyContentType } from "../middlewares/contentType.middleware.js";
+import { validateBody } from "../middlewares/validate.middleware.js";
+import {
+  initUploadBodySchema,
+  chunkUploadBodySchema,
+} from "../schemas/upload.schema.js";
 
 const uploadRouter = Router();
 
@@ -34,7 +39,12 @@ const chunkLimiter = rateLimit({
   message: "Too many chunk upload requests from this IP, please slow down",
 });
 
-uploadRouter.post("/init", initLimiter, initUpload);
+uploadRouter.post(
+  "/init",
+  initLimiter,
+  validateBody(initUploadBodySchema),
+  initUpload,
+);
 
 uploadRouter.post(
   "/single",
@@ -44,7 +54,13 @@ uploadRouter.post(
   singleFileUpload,
 );
 
-uploadRouter.post("/chunk", chunkLimiter, chunkUploadMiddleware, chunkFileUpload);
+uploadRouter.post(
+  "/chunk",
+  chunkLimiter,
+  chunkUploadMiddleware,
+  validateBody(chunkUploadBodySchema),
+  chunkFileUpload,
+);
 
 uploadRouter.get("/:uploadId/status", getUploadStatus);
 
