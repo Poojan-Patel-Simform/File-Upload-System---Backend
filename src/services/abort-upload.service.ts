@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "fs/promises";
 import { prisma } from "../db/prisma.js";
 import { CHUNK_DIR } from "../constants.js";
+import * as chunkStore from "./chunk-store.js";
 
 export const abortUploadService = async (req: Request, res: Response) => {
   try {
@@ -36,6 +37,7 @@ export const abortUploadService = async (req: Request, res: Response) => {
 
     const uploadDir = path.join(CHUNK_DIR, upload.id);
     await fs.rm(uploadDir, { recursive: true, force: true });
+    await chunkStore.deleteAllChunks(upload.id);
 
     const aborted = await prisma.upload.update({
       where: { id: upload.id },

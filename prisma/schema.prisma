@@ -28,22 +28,5 @@ model Upload {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  chunks UploadChunk[]
-
   @@map("uploads")
-}
-
-model UploadChunk {
-  uploadId   String
-  chunkIndex Int
-
-  checksum String?
-
-  uploadedAt DateTime @default(now())
-
-  upload Upload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
-
-  @@id([uploadId, chunkIndex])
-  @@index([uploadId])
-  @@map("upload_chunks")
 }

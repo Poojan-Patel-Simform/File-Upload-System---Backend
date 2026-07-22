@@ -5,6 +5,7 @@ import { CHUNK_DIR } from "../constants.js";
 import { createHash } from "node:crypto";
 import fs from "fs/promises";
 import { type InitUploadBody } from "../schemas/upload.schema.js";
+import * as chunkStore from "./chunk-store.js";
 
 export const initUploadService = async (req: Request, res: Response) => {
   try {
@@ -13,11 +14,6 @@ export const initUploadService = async (req: Request, res: Response) => {
 
     const existingUpload = await prisma.upload.findFirst({
       where: { fileHash },
-      include: {
-        chunks: {
-          select: { chunkIndex: true, checksum: true },
-        },
-      },
     });
 
     if (!existingUpload) {
@@ -52,12 +48,16 @@ export const initUploadService = async (req: Request, res: Response) => {
     }
 
     if (existingUpload.status === "UPLOADING") {
+      const uploadedIndices = await chunkStore.getAllChunkIndices(
+        existingUpload.id,
+      );
+
       return res.status(200).json({
         success: true,
         data: {
           status: existingUpload.status,
           uploadId: existingUpload.id,
-          uploadedChunks: existingUpload.chunks.map((c) => c.chunkIndex),
+          uploadedChunks: uploadedIndices,
         },
       });
     }
@@ -82,10 +82,14 @@ export const initUploadService = async (req: Request, res: Response) => {
         try {
           await fs.access(uploadDir);
 
+          const existingChunks = await chunkStore.getAllChunks(
+            existingUpload.id,
+          );
+
           const surviving: number[] = [];
           const stale: number[] = [];
 
-          for (const chunk of existingUpload.chunks) {
+          for (const chunk of existingChunks) {
             const chunkPath = path.join(uploadDir, String(chunk.chunkIndex));
             try {
               const stat = await fs.stat(chunkPath);
@@ -119,12 +123,7 @@ export const initUploadService = async (req: Request, res: Response) => {
       }
 
       if (staleIndices.length > 0) {
-        await prisma.uploadChunk.deleteMany({
-          where: {
-            uploadId: existingUpload.id,
-            chunkIndex: { in: staleIndices },
-          },
-        });
+        await chunkStore.deleteChunkFields(existingUpload.id, staleIndices);
       }
 
       if (survivingIndices !== null) {
@@ -151,9 +150,7 @@ export const initUploadService = async (req: Request, res: Response) => {
 
       await fs.rm(uploadDir, { recursive: true, force: true });
 
-      await prisma.uploadChunk.deleteMany({
-        where: { uploadId: existingUpload.id },
-      });
+      await chunkStore.deleteAllChunks(existingUpload.id);
 
       const restarted = await prisma.upload.update({
         where: { id: existingUpload.id },
@@ -176,12 +173,16 @@ export const initUploadService = async (req: Request, res: Response) => {
       });
     }
 
+    const uploadedIndices = await chunkStore.getAllChunkIndices(
+      existingUpload.id,
+    );
+
     return res.status(200).json({
       success: true,
       data: {
         status: existingUpload.status,
         uploadId: existingUpload.id,
-        uploadedChunks: existingUpload.chunks.map((c) => c.chunkIndex),
+        uploadedChunks: uploadedIndices,
       },
     });
   } catch (error) {
